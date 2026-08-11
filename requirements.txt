@@ -1,6 +1,6 @@
 streamlit
+img2table
 easyocr
 pandas
-python-docx
 xlsxwriter
 pillow
