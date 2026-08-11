@@ -4,3 +4,4 @@ easyocr
 pandas
 xlsxwriter
 pillow
+opencv-python-headless
