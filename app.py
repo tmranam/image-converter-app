@@ -33,7 +33,7 @@ if uploaded_file is not None:
     # Tick Boxes
     want_excel = st.checkbox("Convert into Clean Excel Spreadsheet")
     
-    if st.button("Extract Grid Structure"):
+        if st.button("Extract Grid Structure"):
         if not want_excel:
             st.warning("Please check the Excel conversion checkbox first.")
         else:
@@ -43,22 +43,23 @@ if uploaded_file is not None:
                     src_image = TableImage(BytesIO(image_bytes))
                     
                     # 2. Extract structural table mapping
-                    # implicit_rows=True processes tables with partial border designs
-                    # borderless_tables=True helps find structured text lacking deep black lines
                     extracted_tables = src_image.extract_tables(
                         ocr=ocr_engine, 
                         implicit_rows=True, 
                         borderless_tables=True
                     )
                     
+                    # 3. FIX: Check if any table objects were returned in the list
                     if not extracted_tables:
                         st.error("Could not trace table borders. Trying fallback extraction...")
                         # Fallback simple dataframe if geometry fails completely
                         fallback_text = ocr_engine.readtext(image_bytes)
-                        df = pd.DataFrame([line[1].split() for line in fallback_text])
+                        df = pd.DataFrame([line.split() for line in fallback_text])
                     else:
-                        # 3. Pull the top-detected grid table layout and turn it into a Pandas DataFrame
+                        # Grab the first actual Table object from the list index [0]
                         primary_table = extracted_tables[0]
+                        
+                        # Now .to_dataframe() will work perfectly on the single table object
                         df = primary_table.to_dataframe()
                     
                     # Clean up empty data fields or formatting hiccups
@@ -84,3 +85,4 @@ if uploaded_file is not None:
                     
                 except Exception as error_msg:
                     st.error(f"Execution Error: {str(error_msg)}")
+
