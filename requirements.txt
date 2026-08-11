@@ -1,0 +1,6 @@
+streamlit
+easyocr
+pandas
+python-docx
+xlsxwriter
+pillow
