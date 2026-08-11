@@ -1,90 +1,86 @@
-import streamlit as tf
+import streamlit as st
 import pandas as pd
-from docx import Document
 from io import BytesIO
-import easyocr  # Alternative: import pytesseract
 from PIL import Image
 
-# Initialize the OCR reader (caches the model for performance)
-@tf.cache_resource
-def load_ocr():
-    return easyocr.Reader(['en'])
+# Import layout-aware open source table tools
+from img2table.document import Image as TableImage
+from img2table.ocr import EasyOCR
 
-reader = load_ocr()
+# Initialize and cache the OCR model to keep your app fast
+@st.cache_resource
+def load_ocr_engine():
+    return EasyOCR(lang=["en"])
 
-# App Title & Layout
-tf.set_page_config(page_title="Image Data Extractor", layout="centered")
-tf.title("📷 Image Data Extractor & Converter")
-tf.write("Upload an image to extract text or tabular data into Word or Excel formats.")
+ocr_engine = load_ocr_engine()
 
-# 1. File Uploader Widget
-uploaded_file = tf.file_uploader("Choose an image file...", type=["jpg", "jpeg", "png"])
+# Layout Configuration
+st.set_page_config(page_title="Grid Table OCR", layout="centered")
+st.title("📊 Structural Table Data Extractor")
+st.write("Extracts image data while strictly preserving rows and columns.")
+
+# File Uploader
+uploaded_file = st.file_uploader("Upload table or spreadsheet image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # Display the uploaded image
-    image = Image.open(uploaded_file)
-    tf.image(image, caption="Uploaded Image", use_container_width=True)
+    # Save file into local memory buffer so img2table can process it
+    image_bytes = uploaded_file.getvalue()
     
-    tf.subheader("Conversion Options")
-    tf.write("Select the formats you want to generate:")
+    # Render preview
+    image_preview = Image.open(uploaded_file)
+    st.image(image_preview, caption="Uploaded Data Sheet", use_container_width=True)
     
-    # 2. Tick Box (Checkbox) Widgets
-    want_word = tf.checkbox("Convert to Word (.docx) - Best for paragraphs/text")
-    want_excel = tf.checkbox("Convert to Excel (.xlsx) - Best for tables/grids")
+    # Tick Boxes
+    want_excel = st.checkbox("Convert into Clean Excel Spreadsheet")
     
-    # 3. Action Button
-    if tf.button("Extract and Convert"):
-        if not want_word and not want_excel:
-            tf.warning("Please select at least one format checkbox.")
+    if st.button("Extract Grid Structure"):
+        if not want_excel:
+            st.warning("Please check the Excel conversion checkbox first.")
         else:
-            with tf.spinner("Processing image and extracting data..."):
-                # Run OCR to extract text strings
-                # EasyOCR returns a list of tuples: (bounding box, text, confidence)
-                image_bytes = uploaded_file.getvalue()
-                ocr_results = reader.readtext(image_bytes, detail=0) 
-                
-                # Combine extracted text lines
-                extracted_text = "\n".join(ocr_results)
-                
-                if not extracted_text.strip():
-                    tf.error("No text could be detected in the image.")
-                else:
-                    tf.success("Data successfully extracted!")
+            with st.spinner("Analyzing column layout... This can take up to a minute on free tier servers."):
+                try:
+                    # 1. Load image using img2table object wrapper
+                    src_image = TableImage(BytesIO(image_bytes))
                     
-                    # 4. Generate Requested Formats
-                    if want_word:
-                        # Create Word document in memory
-                        doc = Document()
-                        doc.add_heading("Extracted Text Document", level=1)
-                        doc.add_paragraph(extracted_text)
-                        
-                        word_buffer = BytesIO()
-                        doc.save(word_buffer)
-                        word_buffer.seek(0)
-                        
-                        # Streamlit Download Button for Word
-                        tf.download_button(
-                            label="📥 Download Word Document",
-                            data=word_buffer,
-                            file_name="extracted_data.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
-                        
-                    if want_excel:
-                        # For a simple Excel conversion, split rows by newline
-                        # For advanced tables, consider splitting rows by commas/spaces
-                        rows = [line.split() for line in ocr_results if line.strip()]
-                        df = pd.DataFrame(rows)
-                        
-                        excel_buffer = BytesIO()
-                        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer_engine:
-                            df.to_excel(writer_engine, index=False, header=False, sheet_name="Extracted Data")
-                        excel_buffer.seek(0)
-                        
-                        # Streamlit Download Button for Excel
-                        tf.download_button(
-                            label="📥 Download Excel Spreadsheet",
-                            data=excel_buffer,
-                            file_name="extracted_data.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
+                    # 2. Extract structural table mapping
+                    # implicit_rows=True processes tables with partial border designs
+                    # borderless_tables=True helps find structured text lacking deep black lines
+                    extracted_tables = src_image.extract_tables(
+                        ocr=ocr_engine, 
+                        implicit_rows=True, 
+                        borderless_tables=True
+                    )
+                    
+                    if not extracted_tables:
+                        st.error("Could not trace table borders. Trying fallback extraction...")
+                        # Fallback simple dataframe if geometry fails completely
+                        fallback_text = ocr_engine.readtext(image_bytes)
+                        df = pd.DataFrame([line[1].split() for line in fallback_text])
+                    else:
+                        # 3. Pull the top-detected grid table layout and turn it into a Pandas DataFrame
+                        primary_table = extracted_tables[0]
+                        df = primary_table.to_dataframe()
+                    
+                    # Clean up empty data fields or formatting hiccups
+                    df = df.fillna("")
+                    
+                    # Render interactive preview grid directly inside your Streamlit UI
+                    st.subheader("📝 Extracted Data Preview")
+                    st.dataframe(df, use_container_width=True)
+                    
+                    # 4. Generate structured in-memory Excel file
+                    excel_buffer = BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                        df.to_excel(writer, index=False, header=False, sheet_name="OCR Grid Output")
+                    excel_buffer.seek(0)
+                    
+                    # Download Trigger
+                    st.download_button(
+                        label="📥 Download Grid-Aligned Excel",
+                        data=excel_buffer,
+                        file_name="aligned_table_output.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    
+                except Exception as error_msg:
+                    st.error(f"Execution Error: {str(error_msg)}")
