@@ -61,8 +61,8 @@ if uploaded_file is not None:
                         # Grab the first actual Table object from the list index directly
                         primary_table = extracted_tables[0]
                         
-                        # Convert the single table instance to a Pandas DataFrame
-                        df = primary_table.to_dataframe()
+                        # FIX: Use the .df attribute property instead of .to_dataframe()
+                        df = primary_table.df
                     
                     # Clean up empty data fields or formatting hiccups
                     df = df.fillna("")
